@@ -1,0 +1,161 @@
+import os
+import zmq
+import mmap
+import time
+import socket
+import logging as log
+import numpy as np
+import multiprocessing as mp
+from config_receiver import configurations
+
+chunk_size = mp.Value("i", 1024 * 1024)
+root = configurations["data_dir"]
+HOST, PORT = configurations["receiver"]["host"], configurations["receiver"]["port"]
+
+log_FORMAT = '%(created)f -- %(levelname)s: %(message)s'
+if configurations["loglevel"] == "debug":
+    log.basicConfig(
+        format=log_FORMAT,
+        datefmt='%m/%d/%Y %I:%M:%S %p',
+        level=log.DEBUG,
+    )
+
+    mp.log_to_stderr(log.DEBUG)
+elif configurations["loglevel"] == "info":
+    log.basicConfig(
+        format=log_FORMAT,
+        datefmt='%m/%d/%Y %I:%M:%S %p',
+        level=log.INFO
+    )
+
+    mp.log_to_stderr(log.INFO)
+
+
+def thread_function(filename):
+    zmq_context = zmq.Context()
+    zmq_socket = zmq_context.socket(zmq.REP)
+    zmq_socket.bind("tcp://*:5556")
+    print(' [*] Waiting for messages. To exit press CTRL+C')
+    #  Wait for next request from client
+    message = zmq_socket.recv_string()
+    print("Received request: %s" % message)
+    #  Do some 'work'
+    # time.sleep(len(message))
+
+    #  Send reply back to client
+    zmq_socket.send_string("File received {0} ".format(filename))
+    zmq_socket.close()
+
+
+def worker(sock, process_num):
+    while True:
+        try:
+            client, address = sock.accept()
+            log.info("{u} connected".format(u=address))
+            process_status[process_num] = 1
+            total = 0
+            d = client.recv(1).decode()
+            while d:
+                header = ""
+                while d != '\n':
+                    header += str(d)
+                    d = client.recv(1).decode()
+
+                if file_transfer:
+                    file_stats = header.split(",")
+                    filename, offset, to_rcv = str(file_stats[0]), int(file_stats[1]), int(file_stats[2])
+
+                    if direct_io:
+                        fd = os.open(root + filename, os.O_CREAT | os.O_RDWR | os.O_DIRECT | os.O_SYNC)
+                        m = mmap.mmap(-1, to_rcv)
+                    else:
+                        fd = os.open(root + filename, os.O_CREAT | os.O_RDWR)
+
+                    os.lseek(fd, offset, os.SEEK_SET)
+                    log.debug("Receiving file: {0}".format(filename))
+                    chunk = client.recv(chunk_size.value)
+
+                    while chunk:
+                        # log.debug("Chunk Size: {0}".format(len(chunk)))
+                        if direct_io:
+                            m.write(chunk)
+                            os.write(fd, m)
+                        else:
+                            os.write(fd, chunk)
+
+                        to_rcv -= len(chunk)
+                        total += len(chunk)
+
+                        if to_rcv > 0:
+                            chunk = client.recv(min(chunk_size.value, to_rcv))
+                        else:
+                            print('Success {0}'.format(filename))
+                            log.debug("Successfully received file: {0}".format(filename))
+                            break
+
+                    os.close(fd)
+                else:
+                    chunk = client.recv(chunk_size.value)
+                    while chunk:
+                        chunk = client.recv(chunk_size.value)
+
+                d = client.recv(1).decode()
+
+            total = np.round(total / (1024 * 1024))
+            log.info("{u} exited. total received {d} MB".format(u=address, d=total))
+            client.close()
+            process_status[process_num] = 0
+        except Exception as e:
+            log.error(str(e))
+            # raise e
+
+
+if __name__ == '__main__':
+    direct_io = False
+    file_transfer = True
+    if "file_transfer" in configurations and configurations["file_transfer"] is not None:
+        file_transfer = configurations["file_transfer"]
+
+    num_workers = configurations['max_cc']
+    if num_workers == -1:
+        num_workers = mp.cpu_count()
+
+    # iter = 0
+    while True:
+        try:
+            sock = socket.socket()
+            sock.bind(('', PORT))
+            sock.listen(num_workers)
+        except:
+            time.sleep(1)
+            continue
+        # iter += 1
+        # log.info(f">>>>>> Iterations: {iter} >>>>>>")
+
+        process_status = mp.Array("i", [0 for _ in range(num_workers)])
+        workers = [mp.Process(target=worker, args=(sock, i,)) for i in range(num_workers)]
+        for p in workers:
+            p.daemon = True
+            p.start()
+
+        # while True:
+        #     try:
+        #         time.sleep(1)
+        #     except:
+        #         break
+
+        process_status[0] = 1
+        alive = num_workers
+        while alive > 0:
+            alive = 0
+            for i in range(num_workers):
+                if process_status[i] == 1:
+                    alive += 1
+
+            time.sleep(0.1)
+
+        for p in workers:
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=0.1)
+        sock.close()
