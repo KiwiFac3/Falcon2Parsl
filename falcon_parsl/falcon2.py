@@ -10,9 +10,6 @@ from parsl.utils import RepresentationMixin
 # Initialize the logger
 logger = logging.getLogger(__name__)
 
-# Set the receiver IP address
-RECEIVER_IP = '127.0.0.1'
-
 
 def _get_falcon_provider(dfk, executor_label):
     """

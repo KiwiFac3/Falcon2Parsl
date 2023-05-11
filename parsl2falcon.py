@@ -32,23 +32,22 @@ start_time = time.time()
 
 # define the conversion function
 @python_app
-def convert(inputs=[], outputs=[]):
+def convert(inputs=[]):
     file='/home/mabughosh/mabughosh/data/receive/'+inputs[0].filename
     with open(file, 'r') as f:
-        content = f.read()
+        f.read()
         return file
 
 # set up the inputs and outputs for the conversion
 inputs = []
-# for name in FILE_NAMES:
-#     inputs.append(File('falcon://127.0.0.1' + ROOT_DIR + name))
+for name in FILE_NAMES:
+    inputs.append(File('falcon://127.0.0.1' + ROOT_DIR + name))
 
 inputs.append(File('falcon://134.197.95.132' + ROOT_DIR + 'data44.txt'))
-outputs = File('file:///home/mabughosh/mabughosh/data/ABCD.txt')
 
 # convert the input files and save the outputs
 for name in inputs:
-    f = convert(inputs=[name], outputs=[outputs])
+    f = convert(inputs=[name])
     print(f.result())
 
 # stop the timer and print the elapsed time
