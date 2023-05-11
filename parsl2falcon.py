@@ -7,15 +7,14 @@ from falcon_parsl.falcon2 import FalconStaging
 import config_sender as config
 import time
 
+# set the root directory and host for the receiver
 ROOT_DIR = config.configurations["data_dir"]
 HOST = config.configurations["receiver"]["host"]
 
-# FILE_NAMES = ['1MB_file.txt', '5MB_file.txt']
-# FILE_NAMES = ['1g.bin', '1g_1.bin', '1g_2.bin', '1g_3.bin', '1g_4.bin']
+# set the names of the files to be converted
 FILE_NAMES = ['data.txt', 'data1.txt', 'data2.txt', 'data3.txt']
-# FILE_NAMES = ['1g.bin', '1g_1.bin', '1g_2.bin', '1g_3.bin', '1g_4.bin', '1g_5.bin', '1g_6.bin', '1g_7.bin', '1g_8.bin',
-#               '1g_9.bin']
 
+# set up Parsl config
 config = Config(
     executors=[
         HighThroughputExecutor(
@@ -25,9 +24,13 @@ config = Config(
     ],
 )
 
+# load the Parsl config
 parsl.load(config)
+
+# start a timer to record the elapsed time
 start_time = time.time()
 
+# define the conversion function
 @python_app
 def convert(inputs=[], outputs=[]):
     file='/home/mabughosh/mabughosh/data/receive/'+inputs[0].filename
@@ -35,22 +38,20 @@ def convert(inputs=[], outputs=[]):
         content = f.read()
         return file
 
-
+# set up the inputs and outputs for the conversion
 inputs = []
 # for name in FILE_NAMES:
 #     inputs.append(File('falcon://127.0.0.1' + ROOT_DIR + name))
 
 inputs.append(File('falcon://134.197.95.132' + ROOT_DIR + 'data44.txt'))
-
 outputs = File('file:///home/mabughosh/mabughosh/data/ABCD.txt')
 
-
-f = convert(inputs, outputs=[outputs])
-
+# convert the input files and save the outputs
 for name in inputs:
     f = convert(inputs=[name], outputs=[outputs])
     print(f.result())
 
+# stop the timer and print the elapsed time
 end_time = time.time()
 elapsed_time = end_time - start_time
 print(f"Code ran in {elapsed_time:.2f} seconds")
