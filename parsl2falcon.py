@@ -3,7 +3,7 @@ from parsl import python_app, File, MonitoringHub
 from parsl.config import Config
 from parsl.executors import HighThroughputExecutor
 from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
-from falcon_parsl.falcon2 import FalconStaging
+from data_provider.falcon import FalconStaging
 import config_sender as config
 import time
 
