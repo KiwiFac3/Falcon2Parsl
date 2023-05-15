@@ -1,11 +1,12 @@
 import parsl
-from parsl import python_app, File, MonitoringHub
-from parsl.config import Config
-from parsl.executors import HighThroughputExecutor
-from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
-from data_provider.falcon import FalconStaging
-import config_sender as config
 import time
+from parsl import python_app, File
+from parsl.config import Config
+from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
+from parsl.executors import HighThroughputExecutor
+
+from Falcon import config_sender as config
+from data_provider.falcon import FalconStaging
 
 # set the root directory and host for the receiver
 ROOT_DIR = config.configurations["data_dir"]
@@ -30,13 +31,15 @@ parsl.load(config)
 # start a timer to record the elapsed time
 start_time = time.time()
 
+
 # define the conversion function
 @python_app
 def convert(inputs=[]):
-    file='/home/mabughosh/mabughosh/data/receive/'+inputs[0].filename
+    file = '/home/mabughosh/mabughosh/data/receive/' + inputs[0].filename
     with open(file, 'r') as f:
         f.read()
         return file
+
 
 # set up the inputs and outputs for the conversion
 inputs = []
