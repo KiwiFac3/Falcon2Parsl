@@ -5,12 +5,15 @@ from parsl.config import Config
 from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
 from parsl.executors import HighThroughputExecutor
 
-from Falcon import config_sender as config
+import sys
+sys.path.insert(0,'/home/mabughosh/Falcon2Parsl')
+import Falcon.config_sender as config
 from data_provider.falcon import FalconStaging
 
 # set the root directory and host for the receiver
 ROOT_DIR = config.configurations["data_dir"]
 HOST = config.configurations["receiver"]["host"]
+
 
 # set the names of the files to be converted
 FILE_NAMES = ['data.txt', 'data1.txt', 'data2.txt', 'data3.txt']

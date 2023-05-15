@@ -4,10 +4,8 @@ from parsl.config import Config
 from parsl.executors import HighThroughputExecutor
 from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
 from parsl.data_provider.globus import GlobusStaging
-from Falcon import config_sender as config
 
 ROOT_DIR = '/home/mabughosh/mabughosh/data/receive'
-HOST = config.configurations["receiver"]["host"]
 
 config = Config(
     executors=[
@@ -36,4 +34,4 @@ def read_file(url):
 remote_file = File("globus://5fe6f79e-dfae-11ed-9a5f-83ef71fbf0ae/home/mabughosh/mabughosh/data/send/data44.txt")
 
 f = read_file(remote_file)
-print(f.result())
+# print(f.result())
