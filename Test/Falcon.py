@@ -1,22 +1,27 @@
 import parsl
-import time
 from parsl import python_app, File
 from parsl.config import Config
 from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
 from parsl.executors import HighThroughputExecutor
+import time
 
 import sys
-sys.path.insert(0,'/home/mabughosh/Falcon2Parsl')
-import Falcon.config_sender as config
+
+sys.path.insert(0, '/data/mabughosh/Falcon2Parsl')
 from data_provider.falcon import FalconStaging
 
-# set the root directory and host for the receiver
-ROOT_DIR = config.configurations["data_dir"]
-HOST = config.configurations["receiver"]["host"]
+# set the working directory and host for the receiver
+working_dir = '/data/mabughosh/files/'
 
 
-# set the names of the files to be converted
-FILE_NAMES = ['data.txt', 'data1.txt', 'data2.txt', 'data3.txt']
+# define the conversion function
+@python_app
+def convert(inputs=[]):
+    file = '/data/mabughosh/Falcon2Parsl/data/' + inputs.filename
+    with open(file, 'r') as f:
+        f.read()
+        return file
+
 
 # set up Parsl config
 config = Config(
@@ -24,6 +29,7 @@ config = Config(
         HighThroughputExecutor(
             storage_access=[FalconStaging(), NoOpFileStaging(), FTPSeparateTaskStaging(),
                             HTTPSeparateTaskStaging()],
+            max_workers=8
         ),
     ],
 )
@@ -34,27 +40,19 @@ parsl.load(config)
 # start a timer to record the elapsed time
 start_time = time.time()
 
-
-# define the conversion function
-@python_app
-def convert(inputs=[]):
-    file = '/home/mabughosh/mabughosh/data/receive/' + inputs[0].filename
-    with open(file, 'r') as f:
-        f.read()
-        return file
-
-
 # set up the inputs and outputs for the conversion
 inputs = []
-for name in FILE_NAMES:
-    inputs.append(File('falcon://127.0.0.1' + ROOT_DIR + name))
+for x in range(0, 100):
+    inputs.append(File('falcon://134.197.113.70' + working_dir + 'largefile' + str(x) + '.txt'))
 
-inputs.append(File('falcon://134.197.95.132' + ROOT_DIR + 'data44.txt'))
+convert_tasks = []
 
 # convert the input files and save the outputs
 for name in inputs:
-    f = convert(inputs=[name])
-    print(f.result())
+    task = convert(name)
+    convert_tasks.append(task)
+
+results = [task.result() for task in convert_tasks]
 
 # stop the timer and print the elapsed time
 end_time = time.time()

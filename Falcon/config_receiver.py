@@ -3,9 +3,8 @@ configurations = {
         "host": "127.0.0.1",
         "port": 50021
     },
-    "data_dir": "/home/mabughosh/mabughosh/data/receive/",
+    "data_dir": "/data/mabughosh/Falcon2Parsl/data/",
     "max_cc": 20,
     "file_transfer": True,
     "loglevel": "info",
 }
-# 134.197.95.132

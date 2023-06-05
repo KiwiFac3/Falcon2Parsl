@@ -1,9 +1,9 @@
 configurations = {
     "receiver": {
-        "host": "127.0.0.1",
+        "host": "134.197.113.71",
         "port": 50021
     },
-    "data_dir": "/home/mabughosh/mabughosh/data/send/",
+    "data_dir": "/data/mabughosh/files/",
     "method": "gradient", # options: [gradient, bayes, random, brute, probe, cg, lbfgs]
     "bayes": {
         "initial_run": 3,
@@ -25,5 +25,5 @@ configurations = {
         "bsize": 10,
         "thread": 5
     },
-    "max_cc": 2,
+    "max_cc": 20,
 }
