@@ -1,5 +1,4 @@
 import os
-import zmq
 import mmap
 import time
 import socket
@@ -31,22 +30,6 @@ elif configurations["loglevel"] == "info":
     mp.log_to_stderr(log.INFO)
 
 
-def thread_function(filename):
-    zmq_context = zmq.Context()
-    zmq_socket = zmq_context.socket(zmq.REP)
-    zmq_socket.bind("tcp://*:5556")
-    print(' [*] Waiting for messages. To exit press CTRL+C')
-    #  Wait for next request from client
-    message = zmq_socket.recv_string()
-    print("Received request: %s" % message)
-    #  Do some 'work'
-    # time.sleep(len(message))
-
-    #  Send reply back to client
-    zmq_socket.send_string("File received {0} ".format(filename))
-    zmq_socket.close()
-
-
 def worker(sock, process_num):
     while True:
         try:
@@ -76,7 +59,6 @@ def worker(sock, process_num):
                     chunk = client.recv(chunk_size.value)
 
                     while chunk:
-                        # log.debug("Chunk Size: {0}".format(len(chunk)))
                         if direct_io:
                             m.write(chunk)
                             os.write(fd, m)
@@ -89,7 +71,6 @@ def worker(sock, process_num):
                         if to_rcv > 0:
                             chunk = client.recv(min(chunk_size.value, to_rcv))
                         else:
-                            print('Success {0}'.format(filename))
                             log.debug("Successfully received file: {0}".format(filename))
                             break
 
@@ -120,42 +101,28 @@ if __name__ == '__main__':
     if num_workers == -1:
         num_workers = mp.cpu_count()
 
-    # iter = 0
-    while True:
-        try:
-            sock = socket.socket()
-            sock.bind(('', PORT))
-            sock.listen(num_workers)
-        except:
-            time.sleep(1)
-            continue
-        # iter += 1
-        # log.info(f">>>>>> Iterations: {iter} >>>>>>")
+    sock = socket.socket()
+    sock.bind(('', PORT))
+    sock.listen(num_workers)
 
-        process_status = mp.Array("i", [0 for _ in range(num_workers)])
-        workers = [mp.Process(target=worker, args=(sock, i,)) for i in range(num_workers)]
-        for p in workers:
-            p.daemon = True
-            p.start()
+    process_status = mp.Array("i", [0 for _ in range(num_workers)])
+    workers = [mp.Process(target=worker, args=(sock, i,)) for i in range(num_workers)]
+    for p in workers:
+        p.daemon = True
+        p.start()
 
-        # while True:
-        #     try:
-        #         time.sleep(1)
-        #     except:
-        #         break
+    process_status[0] = 1
+    alive = num_workers
+    while alive > 0:
+        alive = 0
+        for i in range(num_workers):
+            if process_status[i] == 1:
+                alive += 1
 
-        process_status[0] = 1
-        alive = num_workers
-        while alive > 0:
-            alive = 0
-            for i in range(num_workers):
-                if process_status[i] == 1:
-                    alive += 1
+        time.sleep(0.1)
 
-            time.sleep(0.1)
-
-        for p in workers:
-            if p.is_alive():
-                p.terminate()
-                p.join(timeout=0.1)
+    for p in workers:
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=0.1)
         sock.close()

@@ -1,8 +1,8 @@
 import parsl
 from parsl import python_app, File
 from parsl.config import Config
-from parsl.data_provider.data_manager import NoOpFileStaging, FTPSeparateTaskStaging, HTTPSeparateTaskStaging
-from parsl.executors import HighThroughputExecutor
+#from parsl.data_provider.data_manager import FalconStaging
+from parsl.executors import HighThroughputExecutor, ThreadPoolExecutor
 import time
 
 import sys
@@ -17,19 +17,20 @@ working_dir = '/data/mabughosh/files/'
 # define the conversion function
 @python_app
 def convert(inputs=[]):
-    file = '/data/mabughosh/Falcon2Parsl/data/' + inputs.filename
-    with open(file, 'r') as f:
-        f.read()
-        return file
+    file = '/data/mabughosh/files/' + inputs.filename
+    message =  inputs.filename + " is ready for processing"
+    return message
+    #with open(file, 'r') as f:
+    # f.read()
+    # return file
 
 
 # set up Parsl config
 config = Config(
     executors=[
-        HighThroughputExecutor(
-            storage_access=[FalconStaging(), NoOpFileStaging(), FTPSeparateTaskStaging(),
-                            HTTPSeparateTaskStaging()],
-            max_workers=8
+        ThreadPoolExecutor(
+            storage_access=[FalconStaging()],
+            max_threads=20
         ),
     ],
 )
@@ -42,8 +43,9 @@ start_time = time.time()
 
 # set up the inputs and outputs for the conversion
 inputs = []
-for x in range(0, 100):
-    inputs.append(File('falcon://134.197.113.70' + working_dir + 'largefile' + str(x) + '.txt'))
+inputs.append(File('falcon://134.197.113.70' + working_dir))
+#for x in range(0, 5):
+#    inputs.append(File('falcon://134.197.113.70' + working_dir + 'largefile' + str(x) + '.txt'))
 
 convert_tasks = []
 
