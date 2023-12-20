@@ -119,20 +119,16 @@ def worker(process_id, q):
                             with file_incomplete.get_lock():
                                 file_incomplete.value -= 1
                     else:
-                        print('Processing Dir...')
                         path = file_names[file_id[0]]
                         dir_id = file_id[1].get()
-                        print('dir_id', dir_id)
                         file_list = os.listdir(path)
                         file_name = path + file_list[dir_id]
-                        print('file_name', file_name)
                         offset = file_offsets[file_id[0]]
                         to_send = [a - b for a, b in zip(file_sizes[file_id[0]], offset)]
                         if (to_send[dir_id] > 0) and (process_status[process_id] == 1):
                             file = open(file_name, "rb")
                             msg = file_name.split('/')[-1] + "," + str(int(offset[dir_id]))
                             msg += "," + str(int(to_send[dir_id])) + "\n"
-                            print('msg: ',msg)
                             sock.send(msg.encode())
 
                             log.debug("starting {0}, {1}, {2}, {3}".format(process_id, file_id, dir_id, file_name))
@@ -166,16 +162,19 @@ def worker(process_id, q):
                                         timer100ms = time.time()
                         if to_send[dir_id] > 0:
                             file_id[1].put(dir_id)
+                            q.put(file_id)
                         else:
-                            if not file_id[1].empty():
-                                q.put(file_id)
-                            else:
-                                print('Here')
-                                finished_files.put(path)
-                                with file_incomplete.get_lock():
-                                    file_incomplete.value -= 1
-
-
+                            print('Finished file: ', file_list[dir_id])
+                            with lock:
+                                print(file_id[2])
+                                file_id[2].remove(file_list[dir_id])
+                                if not file_id[2]:
+                                    print('Finished path: ', path)
+                                    finished_files.put(path)
+                                    with file_incomplete.get_lock():
+                                        file_incomplete.value -= 1
+                                else:
+                                    q.put(file_id)
 
                     sock.close()
                 except socket.timeout as e:
@@ -427,6 +426,7 @@ def update_arguments(filepath):
     file_names.append(filepath)
     if os.path.isdir(filepath):
         dir_files = os.listdir(filepath)
+        dir_files_list = manager.list(dir_files)
         file_sizes.append([os.path.getsize(filepath+filename) for filename in dir_files])
 
         file_offsets.append([0] * len(dir_files))
@@ -434,7 +434,7 @@ def update_arguments(filepath):
         for i in range(len(os.listdir(filepath))):
             dir_queue.put(i)
         for _ in range(len(os.listdir(filepath))):
-            q.put((file_count,dir_queue))
+            q.put((file_count, dir_queue, dir_files_list))
     else:
         file_sizes.append(os.path.getsize('/' + filepath.split('/', 1)[1]))
         file_offsets.append(0.0)
