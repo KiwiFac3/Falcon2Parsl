@@ -165,11 +165,17 @@ def worker(process_id, q):
 
                                         timer100ms = time.time()
                         if to_send[dir_id] > 0:
-                            q.put(file_id)
+                            file_id[1].put(dir_id)
                         else:
-                            finished_files.put(file_name)
-                            with file_incomplete.get_lock():
-                                file_incomplete.value -= 1
+                            if not file_id[1].empty():
+                                q.put(file_id)
+                            else:
+                                print('Here')
+                                finished_files.put(file_names[file_id[0]])
+                                with file_incomplete.get_lock():
+                                    file_incomplete.value -= 1
+
+
 
                     sock.close()
                 except socket.timeout as e:
@@ -424,11 +430,11 @@ def update_arguments(filepath):
         file_sizes.append([os.path.getsize(filepath+filename) for filename in dir_files])
 
         file_offsets.append([0] * len(dir_files))
-        # dir_tuple=(file_count,manager.Queue(-1))
+        dir_tuple=(file_count,manager.Queue(-1))
         for i in range(len(os.listdir(filepath))):
-            q.put((file_count,i)) #new
-        #     dir_tuple[1].put(i)
-        # q.put(dir_tuple)
+            # q.put((file_count,i))
+            dir_tuple[1].put(i)
+        q.put(dir_tuple)
     else:
         file_sizes.append(os.path.getsize('/' + filepath.split('/', 1)[1]))
         file_offsets.append(0.0)
