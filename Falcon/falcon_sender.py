@@ -121,7 +121,7 @@ def worker(process_id, q):
                     else:
                         print('Processing Dir...')
                         path = file_names[file_id[0]]
-                        dir_id = file_id[1]
+                        dir_id = file_id[1].get()
                         print('dir_id', dir_id)
                         file_list = os.listdir(path)
                         file_name = path + file_list[dir_id]
@@ -171,7 +171,7 @@ def worker(process_id, q):
                                 q.put(file_id)
                             else:
                                 print('Here')
-                                finished_files.put(file_names[file_id[0]])
+                                finished_files.put(path)
                                 with file_incomplete.get_lock():
                                     file_incomplete.value -= 1
 
@@ -430,11 +430,11 @@ def update_arguments(filepath):
         file_sizes.append([os.path.getsize(filepath+filename) for filename in dir_files])
 
         file_offsets.append([0] * len(dir_files))
-        dir_tuple=(file_count,manager.Queue(-1))
+        dir_queue=manager.Queue(-1)
         for i in range(len(os.listdir(filepath))):
-            # q.put((file_count,i))
-            dir_tuple[1].put(i)
-        q.put(dir_tuple)
+            dir_queue.put(i)
+        for _ in range(len(os.listdir(filepath))):
+            q.put((file_count,dir_queue))
     else:
         file_sizes.append(os.path.getsize('/' + filepath.split('/', 1)[1]))
         file_offsets.append(0.0)
