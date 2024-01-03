@@ -8,7 +8,7 @@ import datetime
 import numpy as np
 import logging as log
 import multiprocessing as mp
-from threading import Thread, Lock
+from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 from config_sender import configurations
 from search import base_optimizer, dummy, brute_force, hill_climb, cg_opt, lbfgs_opt, gradient_opt_fast
@@ -95,7 +95,6 @@ def worker(process_id, q):
                                     block_size = min(chunk_size, to_send)
                                     if file_transfer:
                                         sent = sock.sendfile(file=file, offset=int(offset), count=int(block_size))
-                                        # data = os.preadv(file, block_size, offset)
                                     else:
                                         data_to_send = bytearray(int(block_size))
                                         sent = sock.send(data_to_send)
@@ -124,32 +123,31 @@ def worker(process_id, q):
                         file_list = os.listdir(path)
                         file_name = path + file_list[dir_id]
                         offset = file_offsets[file_id[0]]
-                        to_send = [a - b for a, b in zip(file_sizes[file_id[0]], offset)]
-                        if (to_send[dir_id] > 0) and (process_status[process_id] == 1):
+                        to_send = file_sizes[file_id[0]][dir_id] - offset[dir_id]
+                        if (to_send > 0) and (process_status[process_id] == 1):
                             file = open(file_name, "rb")
                             msg = file_name.split('/')[-1] + "," + str(int(offset[dir_id]))
-                            msg += "," + str(int(to_send[dir_id])) + "\n"
+                            msg += "," + str(int(to_send)) + "\n"
                             sock.send(msg.encode())
 
                             log.debug("starting {0}, {1}, {2}, {3}".format(process_id, file_id, dir_id, file_name))
                             timer100ms = time.time()
 
-                            while (to_send[dir_id] > 0) and (process_status[process_id] == 1):
+                            while (to_send > 0) and (process_status[process_id] == 1):
                                 if emulab_test:
                                     block_size = min(chunk_size, second_target - second_data_count)
                                     data_to_send = bytearray(int(block_size))
                                     sent = sock.send(data_to_send)
                                 else:
-                                    block_size = min(chunk_size, to_send[dir_id])
+                                    block_size = min(chunk_size, to_send)
                                     if file_transfer:
                                         sent = sock.sendfile(file=file, offset=int(offset[dir_id]), count=int(block_size))
-                                        # data = os.preadv(file, block_size, offset)
                                     else:
                                         data_to_send = bytearray(int(block_size))
                                         sent = sock.send(data_to_send)
 
                                 offset[dir_id] += sent
-                                to_send[dir_id] -= sent
+                                to_send -= sent
                                 file_offsets[file_id[0]] = offset
 
                                 if emulab_test:
@@ -160,21 +158,18 @@ def worker(process_id, q):
                                             pass
 
                                         timer100ms = time.time()
-                        if to_send[dir_id] > 0:
+                        if to_send > 0:
                             file_id[1].put(dir_id)
                             q.put(file_id)
                         else:
-                            print('Finished file: ', file_list[dir_id])
-                            with lock:
-                                print(file_id[2])
-                                file_id[2].remove(file_list[dir_id])
-                                if not file_id[2]:
-                                    print('Finished path: ', path)
-                                    finished_files.put(path)
-                                    with file_incomplete.get_lock():
-                                        file_incomplete.value -= 1
-                                else:
-                                    q.put(file_id)
+                            file_id[2].remove(file_list[dir_id])
+                            #print(file_id[2])
+                            if not file_id[2]:
+                                finished_files.put(path)
+                                with file_incomplete.get_lock():
+                                    file_incomplete.value -= 1
+                            else:
+                                q.put(file_id)
 
                     sock.close()
                 except socket.timeout as e:
@@ -366,7 +361,7 @@ def report_throughput(start_time):
             if time_since_begining >= 3 and sum(throughput_logs[-3:]) == 0:
                 file_incomplete.value = 0
 
-            total_bytes = np.sum(file_offsets)
+            total_bytes = sum(item if isinstance(item, float) else sum(item) for item in file_offsets)
             thrpt = np.round((total_bytes * 8) / (time_since_begining * 1000 * 1000), 2)
 
             curr_total = total_bytes - previous_total
@@ -429,7 +424,7 @@ def update_arguments(filepath):
         dir_files_list = manager.list(dir_files)
         file_sizes.append([os.path.getsize(filepath+filename) for filename in dir_files])
 
-        file_offsets.append([0] * len(dir_files))
+        file_offsets.append([0.0] * len(dir_files))
         dir_queue=manager.Queue(-1)
         for i in range(len(os.listdir(filepath))):
             dir_queue.put(i)
@@ -445,12 +440,12 @@ def update_arguments(filepath):
 
 
 def ack():
-    finished_files_list = [finished_files.get() for _ in range(finished_files.qsize())]
+    finished_files_list = []
     while True:
         try:
             message = zmq_socket2.recv_string()
             if not finished_files.empty():
-                finished_files_list = finished_files_list + [finished_files.get() for _ in range(finished_files.qsize())]
+                finished_files_list.extend([finished_files.get() for _ in range(finished_files.qsize())])
             if message not in finished_files_list:
                 zmq_socket2.send_string("False")
             else:
@@ -472,6 +467,7 @@ def thread_function():
             update_arguments(message)
 
             #  Send reply back to client
+            print("Queue update with " + message)
             zmq_socket.send_string("Queue update with " + message)
         except Exception as e:
             log.debug(e)
@@ -494,10 +490,6 @@ if __name__ == '__main__':
             format=log_FORMAT,
             datefmt='%m/%d/%Y %I:%M:%S %p',
             level=log.DEBUG,
-            handlers=[
-                log.FileHandler(log_file),
-                log.StreamHandler()
-            ]
         )
 
         mp.log_to_stderr(log.DEBUG)
@@ -506,10 +498,6 @@ if __name__ == '__main__':
             format=log_FORMAT,
             datefmt='%m/%d/%Y %I:%M:%S %p',
             level=log.INFO,
-            handlers=[
-                log.FileHandler(log_file),
-                log.StreamHandler()
-            ]
         )
 
     emulab_test = False
@@ -564,7 +552,6 @@ if __name__ == '__main__':
     zmq_socket2 = zmq_context.socket(zmq.REP)
     zmq_socket2.bind("tcp://*:5556")
 
-    lock = Lock()
     updater = Thread(target=thread_function, args=())
     updater.start()
     acknowledger = Thread(target=ack, args=())
@@ -573,6 +560,7 @@ if __name__ == '__main__':
     while True:
         if file_count > 0:
             main()
+            time.sleep(1)
             zmq_socket.close()
             zmq_socket2.close()
             zmq_context.term()

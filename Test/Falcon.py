@@ -43,7 +43,8 @@ start_time = time.time()
 
 # set up the inputs and outputs for the conversion
 inputs = []
-inputs.append(File('falcon://134.197.113.70' + working_dir))
+for x in range(0, 2):
+    inputs.append(File('falcon://134.197.113.70/data/mabughosh/files' + str(x) + '/'))
 #for x in range(0, 5):
 #    inputs.append(File('falcon://134.197.113.70' + working_dir + 'largefile' + str(x) + '.txt'))
 
