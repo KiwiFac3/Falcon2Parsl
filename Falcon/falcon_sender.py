@@ -5,6 +5,7 @@ import uuid
 import socket
 import warnings
 import datetime
+import glob
 import numpy as np
 import logging as log
 import multiprocessing as mp
@@ -50,10 +51,6 @@ def worker(process_id, q):
             while num_workers.value < 1:
                 pass
             log.debug("Start Process :: {0}".format(process_id))
-            # try:
-            #     sock = socket.socket()
-            #     sock.settimeout(3)
-            #     sock.connect((HOST, PORT))
 
             if emulab_test:
                 target, factor = 20, 10
@@ -68,7 +65,6 @@ def worker(process_id, q):
                     break
 
                 try:
-                    # HOST = file_names[file_id].split('/', 1)[0]
                     sock = socket.socket()
                     sock.settimeout(3)
                     sock.connect((HOST, PORT))
@@ -120,8 +116,10 @@ def worker(process_id, q):
                     else:
                         path = file_names[file_id[0]]
                         dir_id = file_id[1].get()
-                        file_list = os.listdir(path)
-                        file_name = path + file_list[dir_id]
+                        all_files = glob.glob(path + '**', recursive=True)
+                        file_list = [file for file in all_files if os.path.isfile(file)]
+                        # file_list = file_id[2]
+                        file_name = file_list[dir_id]
                         offset = file_offsets[file_id[0]]
                         to_send = file_sizes[file_id[0]][dir_id] - offset[dir_id]
                         if (to_send > 0) and (process_status[process_id] == 1):
@@ -162,8 +160,7 @@ def worker(process_id, q):
                             file_id[1].put(dir_id)
                             q.put(file_id)
                         else:
-                            file_id[2].remove(file_list[dir_id])
-                            #print(file_id[2])
+                            file_id[2].remove(file_name)
                             if not file_id[2]:
                                 finished_files.put(path)
                                 with file_incomplete.get_lock():
@@ -420,9 +417,13 @@ def update_arguments(filepath):
     global q
     file_names.append(filepath)
     if os.path.isdir(filepath):
-        dir_files = os.listdir(filepath)
+        # Get all files recursively
+        all_files = glob.glob(filepath+'**', recursive=True)
+
+        # Filter out directories
+        dir_files = [file for file in all_files if os.path.isfile(file)]
         dir_files_list = manager.list(dir_files)
-        file_sizes.append([os.path.getsize(filepath+filename) for filename in dir_files])
+        file_sizes.append([os.path.getsize(filename) for filename in dir_files])
 
         file_offsets.append([0.0] * len(dir_files))
         dir_queue=manager.Queue(-1)
@@ -467,7 +468,6 @@ def thread_function():
             update_arguments(message)
 
             #  Send reply back to client
-            print("Queue update with " + message)
             zmq_socket.send_string("Queue update with " + message)
         except Exception as e:
             log.debug(e)
