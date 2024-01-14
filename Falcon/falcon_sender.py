@@ -9,7 +9,7 @@ import glob
 import numpy as np
 import logging as log
 import multiprocessing as mp
-from threading import Thread
+from threading import Thread, enumerate as te
 from concurrent.futures import ThreadPoolExecutor
 from config_sender import configurations
 from search import base_optimizer, dummy, brute_force, hill_climb, cg_opt, lbfgs_opt, gradient_opt_fast
@@ -97,124 +97,59 @@ def worker(process_id, q):
                     sock.settimeout(3)
                     sock.connect((HOST, PORT))
 
-                    # Process single file transfer
-                    if type(file_id) is int:
-                        file_name = '/' + file_names[file_id].split('/', 1)[1]
-                        offset = file_offsets[file_id]
-                        to_send = file_sizes[file_id] - offset
+                    file_id, file_name, offset, to_send, dir_id= prepare_file_info(file_id)
 
-                        # Check if there is data to send and the process is still active
-                        if (to_send > 0) and (process_status[process_id] == 1):
-                            file = open(file_name, "rb")
-                            msg = file_name.split('/')[-1] + "," + str(int(offset))
-                            msg += "," + str(int(to_send)) + "\n"
-                            sock.send(msg.encode())
-
-                            log.debug("starting {0}, {1}, {2}".format(process_id, file_id, file_name))
-                            timer100ms = time.time()
-
-                            while (to_send > 0) and (process_status[process_id] == 1):
-                                # Emulab test: Send artificial data in fixed-size blocks
-                                if emulab_test:
-                                    block_size = min(chunk_size, second_target - second_data_count)
-                                    data_to_send = bytearray(int(block_size))
-                                    sent = sock.send(data_to_send)
-                                else:
-                                    # Normal case: Send file data using sendfile or fixed-size blocks
-                                    block_size = min(chunk_size, to_send)
-                                    if file_transfer:
-                                        sent = sock.sendfile(file=file, offset=int(offset), count=int(block_size))
-                                    else:
-                                        data_to_send = bytearray(int(block_size))
-                                        sent = sock.send(data_to_send)
-
-                                # Update offset and remaining data to send
-                                offset += sent
-                                to_send -= sent
-                                file_offsets[file_id] = offset
-
-                                # Emulab test: Sleep to simulate network delay
-                                if emulab_test:
-                                    second_data_count += sent
-                                    if second_data_count >= second_target:
-                                        second_data_count = 0
-                                        while timer100ms + (1 / factor) > time.time():
-                                            pass
-
-                                        timer100ms = time.time()
-
-                        # Check if there is still data to send and requeue the task if needed
-                        if to_send > 0:
-                            q.put(file_id)
-                        else:
-                            # Mark the file as finished and update file_incomplete value
-                            finished_files.put(file_name)
-                            with file_incomplete.get_lock():
-                                file_incomplete.value -= 1
-
-                    # Process multiple file transfer (directory)
-                    else:
-                        path = file_names[file_id[0]]
-                        dir_id = file_id[1].get()
-                        all_files = glob.glob(path + '**', recursive=True)
-                        file_list = [file for file in all_files if os.path.isfile(file)]
-                        file_name = file_list[dir_id]
-                        offset = file_offsets[file_id[0]]
-                        to_send = file_sizes[file_id[0]][dir_id] - offset[dir_id]
-
-                        # Check if there is data to send and the process is still active
-                        if (to_send > 0) and (process_status[process_id] == 1):
-                            file = open(file_name, "rb")
+                    # Check if there is data to send and the process is still active
+                    if (to_send > 0) and (process_status[process_id] == 1):
+                        file = open(file_name, "rb")
+                        if dir_id is not None:
                             msg = file_name.split('/')[-1] + "," + str(int(offset[dir_id]))
-                            msg += "," + str(int(to_send)) + "\n"
-                            sock.send(msg.encode())
+                        else:
+                            msg = file_name.split('/')[-1] + "," + str(int(offset))
+                        msg += "," + str(int(to_send)) + "\n"
+                        sock.send(msg.encode())
 
-                            log.debug("starting {0}, {1}, {2}, {3}".format(process_id, file_id, dir_id, file_name))
-                            timer100ms = time.time()
+                        log.debug("starting {0}, {1}, {2}".format(process_id, file_id, file_name))
+                        timer100ms = time.time()
 
-                            while (to_send > 0) and (process_status[process_id] == 1):
-                                # Emulab test: Send artificial data in fixed-size blocks
-                                if emulab_test:
-                                    block_size = min(chunk_size, second_target - second_data_count)
-                                    data_to_send = bytearray(int(block_size))
-                                    sent = sock.send(data_to_send)
-                                else:
-                                    # Normal case: Send file data using sendfile or fixed-size blocks
-                                    block_size = min(chunk_size, to_send)
-                                    if file_transfer:
+                        while (to_send > 0) and (process_status[process_id] == 1):
+                            # Emulab test: Send artificial data in fixed-size blocks
+                            if emulab_test:
+                                block_size = min(chunk_size, second_target - second_data_count)
+                                data_to_send = bytearray(int(block_size))
+                                sent = sock.send(data_to_send)
+                            else:
+                                # Normal case: Send file data using sendfile or fixed-size blocks
+                                block_size = min(chunk_size, to_send)
+                                if file_transfer:
+                                    if dir_id is not None:
                                         sent = sock.sendfile(file=file, offset=int(offset[dir_id]), count=int(block_size))
                                     else:
-                                        data_to_send = bytearray(int(block_size))
-                                        sent = sock.send(data_to_send)
+                                        sent = sock.sendfile(file=file, offset=int(offset), count=int(block_size))
+                                else:
+                                    data_to_send = bytearray(int(block_size))
+                                    sent = sock.send(data_to_send)
 
-                                # Update offset and remaining data to send
+                            # Update offset and remaining data to send
+                            to_send -= sent
+                            if dir_id is not None:
                                 offset[dir_id] += sent
-                                to_send -= sent
                                 file_offsets[file_id[0]] = offset
-
-                                # Emulab test: Sleep to simulate network delay
-                                if emulab_test:
-                                    second_data_count += sent
-                                    if second_data_count >= second_target:
-                                        second_data_count = 0
-                                        while timer100ms + (1 / factor) > time.time():
-                                            pass
-
-                                        timer100ms = time.time()
-
-                        # Check if there is still data to send and requeue the task if needed
-                        if to_send > 0:
-                            file_id[1].put(dir_id)
-                            q.put(file_id)
-                        else:
-                            # Remove the file from the list or queue based on completion
-                            file_id[2].remove(file_name)
-                            if not file_id[2]:
-                                finished_files.put(path)
-                                with file_incomplete.get_lock():
-                                    file_incomplete.value -= 1
                             else:
-                                q.put(file_id)
+                                offset += sent
+                                file_offsets[file_id] = offset
+
+                            # Emulab test: Sleep to simulate network delay
+                            if emulab_test:
+                                second_data_count += sent
+                                if second_data_count >= second_target:
+                                    second_data_count = 0
+                                    while timer100ms + (1 / factor) > time.time():
+                                        pass
+
+                                    timer100ms = time.time()
+
+                    handle_completion(file_id, file_name, dir_id, to_send)
 
                     # Close the socket
                     sock.close()
@@ -232,6 +167,66 @@ def worker(process_id, q):
 
     # Set the process status to 0 when the loop exits
     process_status[process_id] = 0
+
+def prepare_file_info(file_id):
+    """
+    Prepare file-related information based on the type of file_id.
+
+    Parameters:
+    - file_id: Identifier for the file to be transferred.
+
+    Returns:
+    - Tuple containing file-related information (file_id, file_name, offset, to_send, dir_id).
+    """
+    if type(file_id) is int:
+        file_name = '/' + file_names[file_id].split('/', 1)[1]
+        offset = file_offsets[file_id]
+        to_send = file_sizes[file_id] - offset
+        dir_id = None
+    else:
+        path = file_names[file_id[0]]
+        dir_id = file_id[1].get()
+        file_list = [file for file in glob.glob(path + '**', recursive=True) if os.path.isfile(file)]
+        file_name = file_list[dir_id]
+        offset = file_offsets[file_id[0]]
+        to_send = file_sizes[file_id[0]][dir_id] - offset[dir_id]
+
+    return file_id, file_name, offset, to_send, dir_id
+
+
+def handle_completion(file_id, file_name, dir_id ,to_send):
+    """
+    Handle completion of the file transfer based on the remaining data to send.
+
+    Parameters:
+    - file_id: Identifier for the file to be transferred.
+    - file_name: Name of the file to be transferred.
+    - dir_id: Directory identifier for recursive file transfers.
+    - to_send: Remaining bytes to be sent.
+
+    Returns:
+    None
+    """
+    # Check if there is still data to send and requeue the task if needed
+    if to_send > 0:
+        if dir_id is not None:
+            file_id[1].put(dir_id)
+        q.put(file_id)
+    else:
+        # Remove the file from the list or queue based on completion
+        if dir_id is not None:
+            file_id[2].remove(file_name)
+            if not file_id[2]:
+                finished_files.put(file_names[file_id[0]])
+                with file_incomplete.get_lock():
+                    file_incomplete.value -= 1
+            else:
+                q.put(file_id)
+        else:
+            # Mark the file as finished and update file_incomplete value
+            finished_files.put(file_name)
+            with file_incomplete.get_lock():
+                file_incomplete.value -= 1
 
 
 def event_receiver():
@@ -616,7 +611,7 @@ def main():
 
     # Calculate and log total transfer time and throughput
     time_since_begining = np.round(end - start, 3)
-    total = np.round(np.sum(file_offsets) / (1024 * 1024 * 1024), 3)
+    total = np.round(sum(item if isinstance(item, float) else sum(item) for item in file_offsets) / (1024 * 1024 * 1024), 3)
     thrpt = np.round((total * 8 * 1024) / time_since_begining, 2)
     log.info("Total: {0} GB, Time: {1} sec, Throughput: {2} Mbps".format(
         total, time_since_begining, thrpt))

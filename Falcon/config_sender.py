@@ -17,7 +17,7 @@ configurations = {
     "file_transfer": True,
     "B": 10, # severity of the packet loss punishment
     "K": 1.02, # cost of increasing concurrency
-    "loglevel": "none",
+    "loglevel": "info",
     "probing_sec": 5, # probing interval in seconds
     "multiplier": 1, # multiplier for each files, only for testing purpose
     "mp_opt": False, # Always False for python version
