@@ -12,7 +12,6 @@ configurations = {
     "random": {
         "num_of_exp": 10
     },
-    "emulab_test": False, # True for per process I/O limit emulation
     "centralized": False, # True for centralized optimization
     "file_transfer": True,
     "B": 10, # severity of the packet loss punishment

@@ -9,7 +9,7 @@ import glob
 import numpy as np
 import logging as log
 import multiprocessing as mp
-from threading import Thread, enumerate as te
+from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 from config_sender import configurations
 from search import base_optimizer, dummy, brute_force, hill_climb, cg_opt, lbfgs_opt, gradient_opt_fast
@@ -75,12 +75,6 @@ def worker(process_id, q):
 
             log.debug("Start Process :: {0}".format(process_id))
 
-            # Emulab test parameters
-            if emulab_test:
-                target, factor = 20, 10
-                max_speed = (target * 1000 * 1000) / 8
-                second_target, second_data_count = int(max_speed / factor), 0
-
             # Process tasks from the queue
             while not q.empty() and process_status[process_id] == 1:
                 try:
@@ -97,7 +91,7 @@ def worker(process_id, q):
                     sock.settimeout(3)
                     sock.connect((HOST, PORT))
 
-                    file_id, file_name, offset, to_send, dir_id= prepare_file_info(file_id)
+                    file_id, file_name, offset, to_send, dir_id = prepare_file_info(file_id)
 
                     # Check if there is data to send and the process is still active
                     if (to_send > 0) and (process_status[process_id] == 1):
@@ -113,22 +107,16 @@ def worker(process_id, q):
                         timer100ms = time.time()
 
                         while (to_send > 0) and (process_status[process_id] == 1):
-                            # Emulab test: Send artificial data in fixed-size blocks
-                            if emulab_test:
-                                block_size = min(chunk_size, second_target - second_data_count)
+                            #  Send file data using sendfile or fixed-size blocks
+                            block_size = min(chunk_size, to_send)
+                            if file_transfer:
+                                if dir_id is not None:
+                                    sent = sock.sendfile(file=file, offset=int(offset[dir_id]), count=int(block_size))
+                                else:
+                                    sent = sock.sendfile(file=file, offset=int(offset), count=int(block_size))
+                            else:
                                 data_to_send = bytearray(int(block_size))
                                 sent = sock.send(data_to_send)
-                            else:
-                                # Normal case: Send file data using sendfile or fixed-size blocks
-                                block_size = min(chunk_size, to_send)
-                                if file_transfer:
-                                    if dir_id is not None:
-                                        sent = sock.sendfile(file=file, offset=int(offset[dir_id]), count=int(block_size))
-                                    else:
-                                        sent = sock.sendfile(file=file, offset=int(offset), count=int(block_size))
-                                else:
-                                    data_to_send = bytearray(int(block_size))
-                                    sent = sock.send(data_to_send)
 
                             # Update offset and remaining data to send
                             to_send -= sent
@@ -139,15 +127,18 @@ def worker(process_id, q):
                                 offset += sent
                                 file_offsets[file_id] = offset
 
-                            # Emulab test: Sleep to simulate network delay
-                            if emulab_test:
-                                second_data_count += sent
-                                if second_data_count >= second_target:
-                                    second_data_count = 0
-                                    while timer100ms + (1 / factor) > time.time():
-                                        pass
+                            # Calculate the transmission time for the current chunk of data
+                            transmission_time = (time.time() - timer100ms)
 
-                                    timer100ms = time.time()
+                            # Calculate the delay based on the transmission time and slowdown percentage
+                            with network_slowdown_percentage.get_lock():
+                                delay_seconds = transmission_time * (1/network_slowdown_percentage.value - 1)
+
+                            # Introduce a delay to simulate network lag
+                            time.sleep(delay_seconds)
+
+                            # Reset the timer
+                            timer100ms = time.time()
 
                     handle_completion(file_id, file_name, dir_id, to_send)
 
@@ -167,6 +158,7 @@ def worker(process_id, q):
 
     # Set the process status to 0 when the loop exits
     process_status[process_id] = 0
+
 
 def prepare_file_info(file_id):
     """
@@ -194,7 +186,7 @@ def prepare_file_info(file_id):
     return file_id, file_name, offset, to_send, dir_id
 
 
-def handle_completion(file_id, file_name, dir_id ,to_send):
+def handle_completion(file_id, file_name, dir_id, to_send):
     """
     Handle completion of the file transfer based on the remaining data to send.
 
@@ -263,7 +255,7 @@ def event_receiver():
                     # Adjust process status to activate or deactivate communication channels
                     for i in range(configurations["thread_limit"]):
                         if i < cc:
-                            if (i >= current_cc):
+                            if i >= current_cc:
                                 process_status[i] = 1
                         else:
                             process_status[i] = 0
@@ -273,7 +265,6 @@ def event_receiver():
         except Exception as e:
             # Log any exceptions that may occur during event reception
             log.exception(e)
-
 
 
 def event_sender(sc, rc):
@@ -310,7 +301,6 @@ def event_sender(sc, rc):
     except Exception as e:
         # Log any exceptions that may occur during the event sending process
         log.exception(e)
-
 
 
 def run_centralized():
@@ -611,7 +601,8 @@ def main():
 
     # Calculate and log total transfer time and throughput
     time_since_begining = np.round(end - start, 3)
-    total = np.round(sum(item if isinstance(item, float) else sum(item) for item in file_offsets) / (1024 * 1024 * 1024), 3)
+    total = np.round(
+        sum(item if isinstance(item, float) else sum(item) for item in file_offsets) / (1024 * 1024 * 1024), 3)
     thrpt = np.round((total * 8 * 1024) / time_since_begining, 2)
     log.info("Total: {0} GB, Time: {1} sec, Throughput: {2} Mbps".format(
         total, time_since_begining, thrpt))
@@ -755,6 +746,56 @@ def parsl_receiver():
             log.debug(e)
             break
 
+def parsl_feedback():
+    """
+    A function to receive and process the feedback from clients using ZeroMQ.
+
+    This function runs in an infinite loop, waiting for incoming requests from clients,
+    processing the feedback, and sending a reply of a timestamp back to the client.
+
+    Logs:
+        Exception: If an error occurs during the acknowledgment processing, except when the
+                   ZeroMQ socket or context is closed.
+
+    Returns:
+        None
+    """
+    while True:
+        try:
+            #  Wait for next request from client
+            message = zmq_socket_feedback.recv_string()
+            log.debug("Received request: %s" % message)
+
+            timestamp = time.time()
+
+            # Convert the timestamp to a datetime object
+            datetime_obj = datetime.datetime.fromtimestamp(timestamp)
+
+            # Format the datetime object as a string
+            formatted_time = datetime_obj.strftime('%Y-%m-%d %H:%M:%S')
+
+            #  Send reply back to client
+            zmq_socket_feedback.send_string(formatted_time)
+
+            # #  Change network_slowdown_percentage
+            with network_slowdown_percentage.get_lock():
+                slowdown_percentage = network_slowdown_percentage.value * float(message)
+                print(slowdown_percentage)
+                if slowdown_percentage > 1:
+                    network_slowdown_percentage.value = 1
+                else:
+                    network_slowdown_percentage.value = slowdown_percentage
+
+            # Get the current timestamp
+        except zmq.error.ContextTerminated:
+            # Context was terminated, exit the loop
+            break
+        except Exception as e:
+            # An unexpected exception was encountered and logged
+            log.debug(e)
+            break
+
+
 # Disable FutureWarnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -786,8 +827,7 @@ elif configurations["loglevel"] == "info":
         level=log.INFO,
     )
 
-# Set Emulab test and centralized flags
-emulab_test = configurations.get("emulab_test", False)
+# Set centralized flags
 centralized = configurations.get("centralized", False)
 
 # Initialize ThreadPoolExecutor
@@ -827,6 +867,7 @@ exit_signal = 10 ** 10
 chunk_size = 1 * 1024 * 1024
 num_workers = mp.Value("i", 0)
 file_incomplete = mp.Value("i", file_count)
+network_slowdown_percentage = mp.Value('f', 1)
 process_status = mp.Array("i", [0 for i in range(configurations["thread_limit"])])
 
 # Set host, port, and receiver address
@@ -839,22 +880,25 @@ zmq_socket_receiver = zmq_context.socket(zmq.REP)
 zmq_socket_receiver.bind("tcp://*:5555")
 zmq_socket_ack = zmq_context.socket(zmq.REP)
 zmq_socket_ack.bind("tcp://*:5556")
+zmq_socket_feedback = zmq_context.socket(zmq.REP)
+zmq_socket_feedback.bind("tcp://*:5557")
 
 # Start updater and acknowledger threads
 parsl_receiver = Thread(target=parsl_receiver, args=())
 parsl_receiver.start()
 parsl_acknowledge = Thread(target=parsl_acknowledge, args=())
 parsl_acknowledge.start()
+parsl_feedback = Thread(target=parsl_feedback, args=())
+parsl_feedback.start()
 
 # Main loop
 while True:
     if file_count > 0:
-        print("Running main() ... ")
         main()
-        print("Finished main() ... ")
         time.sleep(1)
         zmq_socket_receiver.close()
         zmq_socket_ack.close()
+        zmq_socket_feedback.close()
         zmq_context.term()
         break
     else:
