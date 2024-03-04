@@ -1,10 +1,11 @@
+import json
 import zmq
 import os
 import time
 import uuid
 import socket
 import warnings
-import datetime
+from datetime import datetime
 import glob
 import numpy as np
 import logging as log
@@ -132,7 +133,7 @@ def worker(process_id, q):
 
                             # Calculate the delay based on the transmission time and slowdown percentage
                             with network_slowdown_percentage.get_lock():
-                                delay_seconds = transmission_time * (1/network_slowdown_percentage.value - 1)
+                                delay_seconds = transmission_time * (1 / network_slowdown_percentage.value - 1)
 
                             # Introduce a delay to simulate network lag
                             time.sleep(delay_seconds)
@@ -746,6 +747,7 @@ def parsl_receiver():
             log.debug(e)
             break
 
+
 def parsl_feedback():
     """
     A function to receive and process the feedback from clients using ZeroMQ.
@@ -760,31 +762,69 @@ def parsl_feedback():
     Returns:
         None
     """
+    tasks = {}
+    last_updated = datetime(1, 1, 1)
+    update_after = 2
+    done_counter = 0
+    total_proc_time = 0
+    total_transfer_time = 0
     while True:
         try:
             #  Wait for next request from client
             message = zmq_socket_feedback.recv_string()
             log.debug("Received request: %s" % message)
 
-            timestamp = time.time()
+            data = json.loads(message)
 
-            # Convert the timestamp to a datetime object
-            datetime_obj = datetime.datetime.fromtimestamp(timestamp)
+            if datetime.fromisoformat(data['task_time_invoked']) > last_updated:
+                if data['task_depends']:
+                    task_depends_id = data['task_depends']
+                    if task_depends_id in tasks:
+                        processing_time = (datetime.fromisoformat(data['task_time_returned']) -
+                                           datetime.fromisoformat(tasks[task_depends_id]['task_time_returned']))
+                        total_proc_time += processing_time.total_seconds()
+                        total_transfer_time += tasks[task_depends_id]['transfer_time']
+                        done_counter += 1
+                        del tasks[task_depends_id]
+                    else:
+                        task = {
+                            "task_time_returned": data['task_time_returned'],
+                        }
+                        tasks[data['task_depends']] = task
 
-            # Format the datetime object as a string
-            formatted_time = datetime_obj.strftime('%Y-%m-%d %H:%M:%S')
-
-            #  Send reply back to client
-            zmq_socket_feedback.send_string(formatted_time)
-
-            # #  Change network_slowdown_percentage
-            with network_slowdown_percentage.get_lock():
-                slowdown_percentage = network_slowdown_percentage.value * float(message)
-                print(slowdown_percentage)
-                if slowdown_percentage > 1:
-                    network_slowdown_percentage.value = 1
                 else:
-                    network_slowdown_percentage.value = slowdown_percentage
+                    transfer_time = (datetime.fromisoformat(data['task_time_returned']) -
+                                     datetime.fromisoformat(data['task_time_invoked']))
+                    task_id = str(data['task_id'])
+                    if task_id in tasks:
+                        processing_time = (datetime.fromisoformat(tasks[task_id]['task_time_returned']) -
+                                           datetime.fromisoformat(data['task_time_returned']))
+                        total_proc_time += processing_time.total_seconds()
+                        total_transfer_time += transfer_time.total_seconds()
+                        done_counter += 1
+                        del tasks[task_id]
+                    else:
+                        task = {
+                            "task_time_returned": data['task_time_returned'],
+                            "transfer_time": transfer_time.total_seconds()
+                        }
+
+                        tasks[task_id] = task
+            if update_after <= done_counter:
+                tasks = {}
+                last_updated = datetime.now()
+                speed_up_factor = total_transfer_time/total_proc_time
+                done_counter = 0
+                total_proc_time = 0
+                total_transfer_time = 0
+
+                #  Change network_slowdown_percentage
+                with network_slowdown_percentage.get_lock():
+                    slowdown_percentage = network_slowdown_percentage.value * float(speed_up_factor)
+                    if slowdown_percentage > 1:
+                        network_slowdown_percentage.value = 1
+                    else:
+                        network_slowdown_percentage.value = slowdown_percentage
 
             # Get the current timestamp
         except zmq.error.ContextTerminated:
@@ -809,7 +849,7 @@ if configurations["thread_limit"] == -1:
 
 # Configure logging
 log_FORMAT = '%(created)f -- %(levelname)s: %(message)s'
-log_file = "logs/" + datetime.datetime.now().strftime("%m_%d_%Y_%H_%M_%S") + ".log"
+log_file = "logs/" + datetime.now().strftime("%m_%d_%Y_%H_%M_%S") + ".log"
 
 # Set log level based on configurations
 if configurations["loglevel"] == "debug":
@@ -880,7 +920,7 @@ zmq_socket_receiver = zmq_context.socket(zmq.REP)
 zmq_socket_receiver.bind("tcp://*:5555")
 zmq_socket_ack = zmq_context.socket(zmq.REP)
 zmq_socket_ack.bind("tcp://*:5556")
-zmq_socket_feedback = zmq_context.socket(zmq.REP)
+zmq_socket_feedback = zmq_context.socket(zmq.PULL)
 zmq_socket_feedback.bind("tcp://*:5557")
 
 # Start updater and acknowledger threads

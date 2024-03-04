@@ -1,16 +1,14 @@
 import parsl
 from parsl import python_app, File
 from parsl.config import Config
-#from parsl.data_provider.data_manager import FalconStaging
 from parsl.executors import ThreadPoolExecutor
 from parsl.monitoring.monitoring import MonitoringHub
 import time
-import os
 
 import sys
 
 sys.path.insert(0, '/data/mabughosh/Falcon2Parsl')
-from data_provider.falcon import FalconStaging, falcon_feedback
+from data_provider.falcon import FalconStaging
 
 # set the working directory and host for the receiver
 working_dir = '/data/mabughosh/files/'
@@ -22,11 +20,7 @@ def convert(inputs=[]):
     file = '/data/mabughosh/files/' + inputs.filename
     message =  inputs.filename + " is ready for processing"
     time.sleep(30)
-    print(message)
     return message
-    #with open(file, 'r') as f:
-    # f.read()
-    # return file
 
 
 # set up Parsl config
@@ -40,6 +34,7 @@ config = Config(
     monitoring=MonitoringHub(
         hub_address='127.0.0.1',
         hub_port=55055,
+        feedback_address='134.197.113.70',
         monitoring_debug=False,
         resource_monitoring_interval=1,
     ),
@@ -64,9 +59,6 @@ convert_tasks = []
 for name in inputs:
     task = convert(name)
     convert_tasks.append(task)
-
-feedback = falcon_feedback(os.getcwd(), update_after=5)
-feedback.start()
 
 results = [task.result() for task in convert_tasks]
 
